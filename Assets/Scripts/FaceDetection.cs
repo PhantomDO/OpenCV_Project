@@ -69,20 +69,34 @@ namespace TD3
             if (currentCapture != null) DestroyVideoCapture(ref currentCapture);
 
             _currentVideoIndex = videoIndex;
-            var framerate = (int)WebcamManager.Instance.cameras[_currentVideoIndex].caps[0].Fps;
-            var resolution = WebcamManager.Instance.cameras[_currentVideoIndex].caps[0].Size;
-            Debug.Log($"Framerate: {framerate}, Resolution: {resolution}");
-            currentCapture = new VideoCapture(_currentVideoIndex, VideoCapture.API.DShow, new Tuple<CapProp, int>[]
-            {
-                new Tuple<CapProp, int>(CapProp.Fps, framerate),
-                new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.x),
-                new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.y)
-            });
 
-            if (currentCapture != null)
+            int framerate = -1;
+            Vector2Int resolution = Vector2Int.zero;
+            if (WebcamManager.Instance)
             {
-                currentCapture.ImageGrabbed += HandleWebcamQueryFrame;
-                currentCapture.Start();
+                var caps = WebcamManager.Instance.cameras[_currentVideoIndex].caps;
+                foreach (var info in caps)
+                {
+                    if (resolution.magnitude < info.Size.magnitude)
+                    {
+                        framerate = (int) info.Fps;
+                        resolution = info.Size;
+                    }
+                }
+
+                Debug.Log($"Framerate: {framerate}, Resolution: {resolution}");
+                currentCapture = new VideoCapture(_currentVideoIndex, VideoCapture.API.DShow, new Tuple<CapProp, int>[]
+                {
+                    new Tuple<CapProp, int>(CapProp.Fps, framerate),
+                    new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.x),
+                    new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.y)
+                });
+
+                if (currentCapture != null)
+                {
+                    currentCapture.ImageGrabbed += HandleWebcamQueryFrame;
+                    currentCapture.Start();
+                }
             }
         }
         
@@ -125,7 +139,7 @@ namespace TD3
                 _currentFrameBgr = new Image<Bgr, byte>(_webcam.Width, _webcam.Height);
             }
 
-            Debug.Log($"Size of image from the main thread: {_currentFrameBgr.Size}");
+            //Debug.Log($"Size of image from the main thread: {_currentFrameBgr.Size}");
             _hasGrabImage = _webcam.Retrieve(_currentFrameBgr);
 
             if (UnityMainThreadDispatcher.Exists())
@@ -140,7 +154,31 @@ namespace TD3
         {
             if (_hasGrabImage)
             {
-                _rawImage.texture = _currentFrameBgr.ToTexture2D();
+                // LINK : https://docs.opencv.org/3.4/df/d0d/tutorial_find_contours.html
+                var currentFrameGray = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 1);
+                CvInvoke.CvtColor(_currentFrameBgr, currentFrameGray, ColorConversion.Bgr2Gray);
+
+                Mat cannyOutput = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 3);
+                CvInvoke.Canny(currentFrameGray, cannyOutput, 125, 250);
+                
+
+                var contours = new VectorOfVectorOfPoint();
+                var hierarchy = new Mat();
+                CvInvoke.FindContours(cannyOutput, contours, hierarchy, RetrType.Tree, ChainApproxMethod.ChainApproxSimple);
+
+                var display = Mat.Zeros(cannyOutput.Width, cannyOutput.Height, DepthType.Cv8U, 3);
+                
+                for (int i = 0; i < contours.Size; i++)
+                {
+                    MCvScalar color = new MCvScalar(
+                        new RNG().Uniform(0, 256), 
+                        new RNG().Uniform(0, 256),
+                        new RNG().Uniform(0, 256));
+                    CvInvoke.DrawContours(display, contours, i, color, 2, LineType.EightConnected, hierarchy, 0);
+                }
+                
+                _rawImage.rectTransform.sizeDelta = new Vector2(_currentFrameBgr.Width, _currentFrameBgr.Height);
+                _rawImage.texture = display.ToTexture2D(); 
             }
             else
             {
