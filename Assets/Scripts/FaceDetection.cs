@@ -18,81 +18,104 @@ namespace TD3
     {
         [SerializeField] private bool _useVideo;
         [SerializeField] private int _videoIndex = 1;
-        [SerializeField] private float _secondBetweenFrame = 0.2f;
         [SerializeField] private UnityEngine.UI.RawImage _rawImage;
 
         private VideoCapture _webcam;
-        private CascadeClassifier _cascade;
 
         private Image<Bgr, byte> _currentFrameBgr;
-        private Image<Rgb, byte> _currentFrameRgb;
-        private Image<Bgra, byte> _currentFrameRgba;
-
         private bool _hasGrabImage; 
-        private Vector2Int _frameSize;
-        private Texture2D _texture2D;
+        
+        private int _currentVideoIndex;
+        private string _videoPath;
 
-        private WaitForSeconds _waitForSecond;
-
-        // Start is called before the first frame update
-        void Start()
+        private int GetVideoIndex(int newer)
         {
-            _waitForSecond = new WaitForSeconds(_secondBetweenFrame);
             var devices = WebCamTexture.devices;
             for (int i = 0; i < devices.Length; i++)
             {
                 Debug.Log($"Devices[{i}]: {devices[i].name}");
             }
 
-            var index = devices.Length < _videoIndex ? devices.Length - 1 : _videoIndex;
-            var videoPath = $"{Application.dataPath}{@"/Videos/demo.mp4"}";
-            Debug.Log(videoPath);
-            _webcam = _useVideo ? new VideoCapture(videoPath) : new VideoCapture(index);
+            return devices.Length < newer ? devices.Length - 1 : newer;
+        }
 
-
-            if (_webcam != null)
+        private void DestroyVideoCapture(ref VideoCapture currentCapture)
+        {
+            if (currentCapture != null)
             {
-                _webcam.ImageGrabbed += HandleWebcamQueryFrame;
-                _webcam.Start();
+                currentCapture.ImageGrabbed -= HandleWebcamQueryFrame;
+                currentCapture.Stop();
+                currentCapture.Dispose();
+                currentCapture = null;
+            }
+        }
+
+        private void GetNewVideoCapture(ref VideoCapture currentCapture, string videoPath)
+        {
+            if (currentCapture != null) DestroyVideoCapture(ref currentCapture);
+
+            currentCapture = new VideoCapture(videoPath, VideoCapture.API.DShow);
+            Debug.Log(videoPath);
+
+            if (currentCapture != null)
+            {
+                currentCapture.ImageGrabbed += HandleWebcamQueryFrame;
+                currentCapture.Start();
+            }
+        }
+
+        private void GetNewVideoCapture(ref VideoCapture currentCapture, int videoIndex = 0)
+        {
+            if (currentCapture != null) DestroyVideoCapture(ref currentCapture);
+
+            _currentVideoIndex = videoIndex;
+            var framerate = (int)WebcamManager.Instance.cameras[_currentVideoIndex].caps[0].Fps;
+            var resolution = WebcamManager.Instance.cameras[_currentVideoIndex].caps[0].Size;
+            Debug.Log($"Framerate: {framerate}, Resolution: {resolution}");
+            currentCapture = new VideoCapture(_currentVideoIndex, VideoCapture.API.DShow, new Tuple<CapProp, int>[]
+            {
+                new Tuple<CapProp, int>(CapProp.Fps, framerate),
+                new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.x),
+                new Tuple<CapProp, int>(CapProp.FrameWidth, resolution.y)
+            });
+
+            if (currentCapture != null)
+            {
+                currentCapture.ImageGrabbed += HandleWebcamQueryFrame;
+                currentCapture.Start();
+            }
+        }
+        
+        // Start is called before the first frame update
+        void Start()
+        {
+            if (_useVideo) GetNewVideoCapture(ref _webcam, $"{Application.dataPath}{@"/Videos/demo.mp4"}");
+            else GetNewVideoCapture(ref _webcam, GetVideoIndex(_videoIndex));
+        }
+
+        void OnValidate()
+        {
+            if (_videoIndex != _currentVideoIndex)
+            {
+                GetNewVideoCapture(ref _webcam, GetVideoIndex(_videoIndex));
             }
         }
 
         // Update is called once per frame
         void Update()
         {
-            if (!_webcam.IsOpened)
+            if (_webcam == null || !_webcam.IsOpened)
             {
                 Debug.LogWarning($"{_webcam} is not open.");
-            }
-            else
-            {
-                StartCoroutine(GrabImage());
             }
         }
 
         // OnDestroy is called at the end of the object (when Destroy(gameObject) is called)
         void OnDestroy()
         {
-            _webcam.ImageGrabbed -= HandleWebcamQueryFrame;
-            _webcam.Stop();
-            _webcam.Dispose();
+            DestroyVideoCapture(ref _webcam);
         }
-
-        IEnumerator GrabImage()
-        {
-            _webcam.Grab();
-            if (_hasGrabImage)
-            {
-                DisplayFrameOnPlane();
-            }
-            else
-            {
-                Debug.LogError($"Can't grab image.");
-            }
-
-            yield return _waitForSecond;
-        }
-
+        
         // HandleWebcamQueryFrame is called when acquisition event occurs.
         // Get the current frame and face detection
         void HandleWebcamQueryFrame(object sender, System.EventArgs eventArgs)
@@ -102,40 +125,29 @@ namespace TD3
                 _currentFrameBgr = new Image<Bgr, byte>(_webcam.Width, _webcam.Height);
             }
 
+            Debug.Log($"Size of image from the main thread: {_currentFrameBgr.Size}");
             _hasGrabImage = _webcam.Retrieve(_currentFrameBgr);
-            //_currentFrameBgr.Flip(FlipType.Vertical);
 
-            if (_frameSize.x != _currentFrameBgr.Width || _frameSize.y != _currentFrameBgr.Height)
+            if (UnityMainThreadDispatcher.Exists())
             {
-                _frameSize = new Vector2Int(_currentFrameBgr.Width, _currentFrameBgr.Height);
-                _currentFrameRgb = new Image<Rgb, byte>(_frameSize.x, _frameSize.y);
-                _currentFrameRgba = new Image<Bgra, byte>(_frameSize.x, _frameSize.y);
+                UnityMainThreadDispatcher.Instance().Enqueue(DisplayFrameOnPlane());
             }
-
-            Debug.Log($"Size of image: {_currentFrameBgr.Size}");
         }
-
+        
         // DisplayFrameOnPlane
         // Load the current frame in a texture draw on plane
-        void DisplayFrameOnPlane()
+        IEnumerator DisplayFrameOnPlane()
         {
-            if (_texture2D != null)
+            if (_hasGrabImage)
             {
-                Destroy(_texture2D);
-                _texture2D = null;
+                _rawImage.texture = _currentFrameBgr.ToTexture2D();
+            }
+            else
+            {
+                Debug.LogError($"Can't grab image.");
             }
 
-            var sizeRect = Vector2Int.CeilToInt(_rawImage.rectTransform.rect.size);
-            _texture2D = new Texture2D(sizeRect.x, sizeRect.y, TextureFormat.BGRA32, false);
-
-            _currentFrameRgb.Bytes = _currentFrameBgr.Bytes;
-            _currentFrameRgba = _currentFrameRgb.Convert<Bgra, byte>();
-            CvInvoke.Flip(_currentFrameRgba, _currentFrameRgba, FlipType.Both);
-            CvInvoke.Resize(_currentFrameRgba, _currentFrameRgba, new Size(sizeRect.x, sizeRect.y));
-            _texture2D.LoadRawTextureData(_currentFrameRgba.Bytes);
-            _texture2D.Apply();
-
-            _rawImage.texture = _texture2D;
+            yield return null;
         }
     }
 }
