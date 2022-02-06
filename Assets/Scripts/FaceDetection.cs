@@ -5,6 +5,7 @@ using System.Drawing;
 using System.Linq;
 using System.Threading;
 using Emgu.CV;
+using Emgu.CV.Aruco;
 using Emgu.CV.Structure;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Ocl;
@@ -141,6 +142,7 @@ namespace TD3
 
             //Debug.Log($"Size of image from the main thread: {_currentFrameBgr.Size}");
             _hasGrabImage = _webcam.Retrieve(_currentFrameBgr);
+            GetMarkers(_currentFrameBgr.Mat);
 
             if (UnityMainThreadDispatcher.Exists())
             {
@@ -155,30 +157,30 @@ namespace TD3
             if (_hasGrabImage)
             {
                 // LINK : https://docs.opencv.org/3.4/df/d0d/tutorial_find_contours.html
-                var currentFrameGray = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 1);
-                CvInvoke.CvtColor(_currentFrameBgr, currentFrameGray, ColorConversion.Bgr2Gray);
+                //var currentFrameGray = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 1);
+                //CvInvoke.CvtColor(_currentFrameBgr, currentFrameGray, ColorConversion.Bgr2Gray);
 
-                Mat cannyOutput = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 3);
-                CvInvoke.Canny(currentFrameGray, cannyOutput, 125, 250);
+                //Mat cannyOutput = new Mat(_currentFrameBgr.Size, DepthType.Cv8U, 3);
+                //CvInvoke.Canny(currentFrameGray, cannyOutput, 125, 250);
                 
 
-                var contours = new VectorOfVectorOfPoint();
-                var hierarchy = new Mat();
-                CvInvoke.FindContours(cannyOutput, contours, hierarchy, RetrType.Tree, ChainApproxMethod.ChainApproxSimple);
+                //var contours = new VectorOfVectorOfPoint();
+                //var hierarchy = new Mat();
+                //CvInvoke.FindContours(cannyOutput, contours, hierarchy, RetrType.Tree, ChainApproxMethod.ChainApproxSimple);
 
-                var display = Mat.Zeros(cannyOutput.Width, cannyOutput.Height, DepthType.Cv8U, 3);
+                //var display = Mat.Zeros(cannyOutput.Width, cannyOutput.Height, DepthType.Cv8U, 3);
                 
-                for (int i = 0; i < contours.Size; i++)
-                {
-                    MCvScalar color = new MCvScalar(
-                        new RNG().Uniform(0, 256), 
-                        new RNG().Uniform(0, 256),
-                        new RNG().Uniform(0, 256));
-                    CvInvoke.DrawContours(display, contours, i, color, 2, LineType.EightConnected, hierarchy, 0);
-                }
+                //for (int i = 0; i < contours.Size; i++)
+                //{
+                //    MCvScalar color = new MCvScalar(
+                //        new RNG().Uniform(0, 256), 
+                //        new RNG().Uniform(0, 256),
+                //        new RNG().Uniform(0, 256));
+                //    CvInvoke.DrawContours(display, contours, i, color, 2, LineType.EightConnected, hierarchy, 0);
+                //}
                 
                 _rawImage.rectTransform.sizeDelta = new Vector2(_currentFrameBgr.Width, _currentFrameBgr.Height);
-                _rawImage.texture = display.ToTexture2D(); 
+                _rawImage.texture = _currentFrameBgr.ToTexture2D(); 
             }
             else
             {
@@ -186,6 +188,30 @@ namespace TD3
             }
 
             yield return null;
+        }
+
+        private void GetMarkers(Mat mat)
+        {
+            VectorOfInt ids = new VectorOfInt();
+            VectorOfVectorOfPointF acceptedCorners = new VectorOfVectorOfPointF();
+            VectorOfVectorOfPointF ignoreCorners = new VectorOfVectorOfPointF();
+            DetectorParameters detectorParameters = new DetectorParameters();
+            detectorParameters = DetectorParameters.GetDefault();
+
+            Dictionary dictMarkers = new Dictionary(Dictionary.PredefinedDictionaryName.Dict6X6_250);
+            Mat grayFrame = new Mat(mat.Width, mat.Height, DepthType.Cv8U, 1);
+            CvInvoke.CvtColor(mat, grayFrame, ColorConversion.Bgr2Gray);
+            ArucoInvoke.DetectMarkers(mat, dictMarkers, acceptedCorners, ids, detectorParameters, ignoreCorners);
+
+            Mat display = new Mat(mat.Width, mat.Height, DepthType.Cv8U, 3);
+            mat.CopyTo(display);
+
+            if (ids.Size > 0)
+            {
+                ArucoInvoke.DrawDetectedMarkers(display, acceptedCorners, ids, new MCvScalar(0,255,0));
+            }
+
+            CvInvoke.Imshow("ArucoDisplay", display);
         }
     }
 }

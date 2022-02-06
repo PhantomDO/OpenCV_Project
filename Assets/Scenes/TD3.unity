@@ -153,7 +153,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _useVideo: 0
-  _videoIndex: 1
+  _videoIndex: 0
   _rawImage: {fileID: 1656378283}
 --- !u!4 &518476444
 Transform:
